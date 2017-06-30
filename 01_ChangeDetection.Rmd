@@ -2,7 +2,9 @@
 title: "BFAST change detection"
 theme: united
 output:
-  pdf_document: default
+  pdf_document: 
+    highlight: tango
+    number_sections: yes
   html_notebook: default
 ---
 # Standard change detection using BFAST and others
@@ -16,6 +18,7 @@ library(lubridate)
 library(feather)
 library(bfast)
 library(tools)
+library(ggplot2)
 ```
 
 ### Load data and aggregate to monthly time series
@@ -33,9 +36,9 @@ names(ll) <- file_path_sans_ext( list.files(path,".feather") )
 Make a test plot and show a standard bfast fit
 
 ```{r}
-sub <- ll$SE2_2014a_Craig_1__10
+sub <- ll$SE2_2014a_Craig_1__5
 # Define time series
-zz <- zooreg(data = sub$NDVI,order.by = sub$date)
+zz <- zooreg(data = sub$EVI2,order.by = sub$date)
 
 plot(zz,xlab = "Date",ylab ="NDVI",type="p")
 
@@ -44,11 +47,104 @@ xx = suppressWarnings( aggregate(zz,as.yearmon, function(x) max(x,na.rm = T)) )
 xx[which(is.infinite(xx))] <- NA
 
 # Run bfast01 model for single breaks
-bf.mod <- bfast01(as.ts(xx),formula = response ~ trend+harmon, test = c("OLS-MOSUM","BIC"),aggregate=any)
+rdist = 12/(length(xx)) # calculate h relative to total sample length
+bf.mod <- bfast01(as.ts(xx),formula = response ~ trend+harmon, test = c("OLS-MOSUM","BIC"),aggregate=any,bandwidth = rdist)
 
 plot(bf.mod)
 
 ```
 
+***
+
+Now apply it for all time series and record the date of the change. 
+This is done in order to verify it with the some of the "dated" change estimates
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+res <- data.frame()
+# Do the loopie
+for( i in names(ll)){
+  sub <- ll[[i]]
+  # Define time series
+  zz <- suppressWarnings( zooreg(data = sub$EVI2,order.by = sub$date) )
+  
+  # Aggregate to monthly data using a max value composite
+  xx = suppressWarnings( aggregate(zz,as.yearmon, function(x) max(x,na.rm = T)) )
+  xx[which(is.infinite(xx))] <- NA
+  
+  # Run bfast01 model for single breaks
+  rdist = 12/(length(xx)) # calculate h relative to total sample length
+  bf1 = try(bfast01(as.ts(xx),formula = response ~ trend, test = c("OLS-MOSUM","BIC"),aggregate=any, bandwidth=rdist),silent=T) # In trend
+    bf2 = try(bfast01(as.ts(x),formula = response ~ trend + harmon, test = c("OLS-MOSUM","BIC"),aggregate=any, bandwidth = rdist),silent=T) # In trend + harmon
+    l = list(bf1,bf2)
+    # Get best model
+    bf <- try( l[[which.min(lapply(l,AIC))]], silent = T )
+    
+    # Extract largest breakpoint
+    if(class(bf)=="try-error")
+    { 
+      # Check if trend only converged and use this instead
+      if(class(bf1)!="try-error"){
+        bf = bf1 # Reset to trend only
+      } else { next() }
+    }
+    if(bf$breaks > 0){
+    # Time of largest change
+    la_year <- bf$data$time[bf$breakpoints] 
+    
+    res <- rbind(res, data.frame(SSBS = i, year = la_year))
+    # clean up
+    rm(i,la_year)
+  }
+}
+```
+### Now verify against the date estimate according to PREDICTS ###
+
+The data contains a field that captures the approximate date of the largest change event
+This information might be incorrect! It could also be that the coordinates or extent are too inaccurate to capture the change
+
+```{r}
+# Assemble full 
+df <- do.call("rbind",ll)
+# Construct names by replacing space with underscores
+df$mergeSSBS <- str_replace_all(df$SSBS,pattern = " ",replacement = "_")
+
+# Subset to columns of interest
+sub <- df %>% dplyr::mutate(SampleStart = year( Sample_start_earliest ) ) %>% 
+  dplyr::select(SSBS,mergeSSBS,SampleStart,Hansenlossyear, YearsOfConversion) %>% distinct_() %>% 
+  # Merge
+  merge.data.frame(.,res,by.x = "mergeSSBS",by.y = "SSBS") %>% 
+  mutate(year = lubridate::year(as.yearmon(year)))
 
 
+```
+
+Now plot and assess match first for PREDICTS record
+
+```{r}
+# Plot years and assess
+qplot(sub$year,sub$YearsOfConversion,xlab = "Year of largest change (BFAST)",ylab = "Year of conversion (PREDICTS)") +
+  geom_smooth(method="lm")
+
+cor.test(sub$year,sub$YearsOfConversion)
+
+summary(lm(sub$year~sub$YearsOfConversion))
+
+```
+
+
+ Now the same for a remote-sensing derived estimate of "deforestation"
+ Hansen only monitors from 2000 onwards, so we subset it to estimate >= 2000 
+ Also limit only to those sites where sampling started before hansen deforestation 
+ 
+ ```{r}
+subs <- subset(sub, year >= 2000) %>%
+  dplyr::filter(SampleStart >= Hansenlossyear ) # Filter out sites that started after disturbance
+
+qplot(subs$year,subs$Hansenlossyear,xlab = "Year of largest change (BFAST)",ylab = "Year of deforestation (Hansen et al.)") +
+  geom_smooth(method="lm")
+
+cor.test(subs$year,subs$Hansenlossyear)
+
+summary(lm(subs$year~subs$YearsOfConversion))
+
+```
