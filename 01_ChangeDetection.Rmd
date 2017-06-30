@@ -1,0 +1,52 @@
+---
+title: "BFAST change detection"
+output: html_notebook
+theme: united
+---
+# Standard change detection using BFAST and others
+
+```{r,message=FALSE, include=FALSE}
+library(dplyr)
+library(zoo)
+library(xts)
+library(stringr)
+library(lubridate)
+library(feather)
+library(bfast)
+library(tools)
+```
+
+### Load data and aggregate to monthly time series
+```{r}
+path = "HackTimeSeries/"
+
+# Load all files
+ll = lapply( list.files(path,".feather",full.names = T), function(x) read_feather(x) )
+
+# Name them
+names(ll) <- file_path_sans_ext( list.files(path,".feather") )
+
+```
+
+Make a test plot and show a standard bfast fit
+
+```{r}
+sub <- ll$SE2_2014a_Craig_1__10
+# Define time series
+zz <- zooreg(data = sub$NDVI,order.by = sub$date)
+
+plot(zz,xlab = "Date",ylab ="NDVI",type="p")
+
+# Aggregate to monthly data using a max value composite
+xx = suppressWarnings( aggregate(zz,as.yearmon, function(x) max(x,na.rm = T)) )
+xx[which(is.infinite(xx))] <- NA
+
+# Run bfast01 model for single breaks
+bf.mod <- bfast01(as.ts(xx),formula = response ~ trend+harmon, test = c("OLS-MOSUM","BIC"),aggregate=any)
+
+plot(bf.mod)
+
+```
+
+
+
