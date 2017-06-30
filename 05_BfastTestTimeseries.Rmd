@@ -1,0 +1,124 @@
+---
+title: "R Notebook"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+
+```{r,message=FALSE, include=FALSE}
+library(dplyr)
+library(zoo)
+library(xts)
+library(stringr)
+library(lubridate)
+library(feather)
+library(bfast)
+library(tools)
+library(ggplot2)
+```
+
+
+Load the test datasets
+
+```{r}
+path = "TestDatasets/"
+
+# Load all files
+ll = lapply( list.files(path,".feather",full.names = T), function(x) read_feather(x) )
+
+# Name them
+names(ll) <- file_path_sans_ext( list.files(path,".feather") )
+ll <- ll[which(!str_detect(string = names(ll),pattern = "TwoBreak"))]
+
+```
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+
+res <- data.frame()
+# Do the loopie
+for( i in names(ll) ){
+  # Define time series
+  xx <- as.data.frame( ll[[i]] )
+  
+  # Define time
+  tt <- seq.Date(as.Date( as.yearmon(1982.01) ),by = "1 month",length.out = 360)
+  zz = zoo(xx$x,order.by = as.yearmon(tt),frequency = 12)
+
+  # Run bfast01 model for single breaks
+  rdist = 12/nrow(xx) # calculate h relative to total sample length
+  bf1 = try(bfast01(as.ts(zz),formula = response ~ trend, test = c("OLS-MOSUM","BIC"),aggregate=any, bandwidth=rdist),silent=T) # In trend
+    bf2 = try(bfast01(as.ts(zz),formula = response ~ trend + harmon, test = c("OLS-MOSUM","BIC"),aggregate=any, bandwidth = rdist),silent=T) # In trend + harmon
+    l = list(bf1,bf2)
+    # Get best model
+    bf <- try( l[[which.min(lapply(l,AIC))]], silent = T )
+    
+    # Extract largest breakpoint
+    if(class(bf)=="try-error")
+    { 
+      # Check if trend only converged and use this instead
+      if(class(bf1)!="try-error"){
+        bf = bf1 # Reset to trend only
+      } else { next() }
+    }
+    
+    if(bf$breaks > 0){
+    # Time of largest change
+    la_year <- bf$data$time[bf$breakpoints] 
+    
+    res <- rbind(res, data.frame(SSBS = i, year = la_year,w = which.min(lapply(l,AIC))))
+    } else {
+        res <- rbind(res, data.frame(SSBS = i, year = 0, w = which.min(lapply(l,AIC))))
+    }
+}
+
+```
+
+The Result. It seems that the seasonal amplitude is quite affected by chance / random noise
+
+```{r}
+
+res
+
+```
+
+
+Fit a seperate model, but consider trend changes only
+
+```{r}
+
+res2 <- data.frame()
+# Do the loopie
+for( i in names(ll) ){
+  # Define time series
+  xx <- as.data.frame( ll[[i]] )
+  
+  # Define time
+  tt <- seq.Date(as.Date( as.yearmon(1982.01) ),by = "1 month",length.out = 360)
+  zz = zoo(xx$x,order.by = as.yearmon(tt),frequency = 12)
+
+  # Run bfast01 model for single breaks
+  rdist = 12/nrow(xx) # calculate h relative to total sample length
+  bf = try(bfast01(as.ts(zz),formula = response ~ trend, test = c("OLS-MOSUM","BIC"),aggregate=any, bandwidth=rdist),silent=T) # In trend
+    if(bf$breaks > 0){
+    # Time of largest change
+    la_year <- bf$data$time[bf$breakpoints] 
+    
+    res2 <- rbind(res2, data.frame(SSBS = i, year = la_year,w = 1) )
+    } else {
+    res2 <- rbind(res2, data.frame(SSBS = i, year = 0, w = 1  ) )
+    }
+}
+
+
+```
+
+
+Apparently the seasonal change detection (harmonic series) overfits on random generated data
+
+
+```{r}
+res2
+```
+
