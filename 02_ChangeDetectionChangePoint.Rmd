@@ -1,0 +1,121 @@
+---
+title: "ChangePoint change detection test"
+theme: united
+output:
+  pdf_document: 
+    highlight: tango
+    number_sections: yes
+  html_notebook: default
+---
+
+# Second test using stable periods in changepoint 
+
+This is a second test for using the changepoint package and PELT algorithm. However changepoint works only on gap-free data, therefore this methodology is a bit more coarse than the other.
+Choose to aggregate to annual time series using a median composite. 
+Loosing a lot of the variation within, but well...
+
+
+```{r,message=FALSE, include=FALSE}
+library(dplyr)
+library(zoo)
+library(xts)
+library(stringr)
+library(lubridate)
+library(feather)
+library(tools)
+library(ggplot2)
+library(changepoint)
+
+```
+
+
+### Load data 
+```{r}
+path = "HackTimeSeries/"
+
+# Load all files
+ll = lapply( list.files(path,".feather",full.names = T), function(x) read_feather(x) )
+
+# Name them
+names(ll) <- file_path_sans_ext( list.files(path,".feather") )
+
+
+```
+
+Now aggregate to annual time series and linearly interpolate over gaps
+
+
+```{r,echo=TRUE, message=FALSE, warning=FALSE}
+band = "EVI2"
+as.year <- function(x) as.integer(as.yearmon(x))
+
+ll2 <- list()
+for(i in names(ll)){
+  sub <- as.data.frame( ll[[i]] )
+  # Define time series
+  zz <- suppressWarnings( zooreg(data = sub[,band],order.by = sub[,"date"] ) )
+
+  # Aggregate to monthly data using a max value composite
+  xx = suppressWarnings( aggregate(zz,as.year, function(x) median(x,na.rm = T)) )
+  xx[which(is.infinite(xx))] <- NA
+  
+  xx <- na.approx(xx)
+  ll2[[i]] <- xx
+  rm(xx)
+}
+
+```
+
+Now apply the changepoint PELT algorithm for mean shifts on the annual aggregations.
+This uses an information theory approach to detect stable periods using the PELT algorithm.
+As minimum segment length I specify exactly 2 years
+
+```{r,echo=TRUE, message=FALSE, warning=FALSE}
+stabPer <- function(x,cp){
+  cp.l <- cpts(cp) # Location of changepoints
+  # Return a list of subsets
+  o <- list(x[1:cp.l[1]]) # The first one
+  cp.l <- c(cp.l, length(x)) # Remove the first and add the last
+  for(i in 1:(length(cp.l)-1)){ 
+    o[[i+1]] <- x[cp.l[i]:cp.l[i+1]] 
+  }
+  return(o)
+}
+
+# Do the loopie
+res <- data.frame()
+# Do the loopie
+for( i in names(ll2)){
+  x = ll2[[i]]
+  # Change in mean/variance
+  try( cp <- cpt.meanvar(x,penalty = "BIC", method = "PELT",minseglen = 2), silent= T)
+      
+    # If that did work and there are more breaks than one
+    if(class(cp)!="try-error" & nseg(cp) > 1){
+      # Number of changepoints  - How many mean+variance shifts happened per pixel (if any)?
+      nr_cp <- ncpts(cp)
+      # Max length (months) of stable period (no mean/variance shift)
+      nr_Mcp <- max(seg.len(cp))
+      # What was its mean estimate ?
+      lss <- stabPer(x,cp) # Get list of subsets
+      nr_MAVG_cp <- mean( lss[[which.max(seg.len(cp))]] )
+      # How long ago did it occur (if the entire pixel time series isn’t stable).
+      nr_Mcptimeago <- time(x)[ cpts(cp)[which.max(seg.len(cp))] ]
+      # What was the greatest magnitude between shifts (difference in mean of stable periods)?
+      lss_d <- diff(unlist(lapply(lss,mean)))  # Subsequential subtraction
+      nr_Mmag <- lss_d[which.max(abs(lss_d))]
+      # When did this occur ?
+      nr_Mmagtime <- time(x)[cpts(cp)[which.max(abs(lss_d))]]
+      
+      res <- rbind(res, data.frame( SSBS = i,nr_Mmag,nr_Mmagtime ))
+    }  
+  }
+
+```
+
+
+Now assess the match between the "validation" columns. 
+So merge back with the original
+
+
+

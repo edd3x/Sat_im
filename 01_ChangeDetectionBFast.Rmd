@@ -21,7 +21,7 @@ library(tools)
 library(ggplot2)
 ```
 
-### Load data and aggregate to monthly time series
+### Load data 
 ```{r}
 path = "HackTimeSeries/"
 
