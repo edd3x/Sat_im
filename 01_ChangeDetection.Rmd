@@ -1,7 +1,9 @@
 ---
 title: "BFAST change detection"
-output: html_notebook
 theme: united
+output:
+  pdf_document: default
+  html_notebook: default
 ---
 # Standard change detection using BFAST and others
 
