@@ -117,5 +117,40 @@ for( i in names(ll2)){
 Now assess the match between the "validation" columns. 
 So merge back with the original
 
+```{r}
+# Assemble full 
+df <- do.call("rbind",ll)
+# Construct names by replacing space with underscores
+df$mergeSSBS <- str_replace_all(df$SSBS,pattern = " ",replacement = "_")
+
+# make troubles
+res$SSBS <- as.character(res$SSBS)
+
+# Subset to columns of interest
+sub <- df %>% dplyr::mutate(SampleStart = year( Sample_start_earliest ) ) %>% 
+  dplyr::select(SSBS,mergeSSBS,SampleStart,Hansenlossyear, YearsOfConversion) %>% distinct_() %>% 
+  # Merge
+  merge.data.frame(.,res,by.x = "mergeSSBS",by.y = "SSBS")
+
+```
+
+ 
+
+No assess the match (_if any_)
+
+```{r}
+
+qplot(sub$nr_Mmagtime,sub$YearsOfConversion,xlab = "Year of largest change (BFAST)",ylab = "Year of conversion (PREDICTS)") +
+  geom_smooth(method="lm")
+
+cor.test(sub$nr_Mmagtime,sub$YearsOfConversion)
+
+summary(lm(sub$nr_Mmagtime~sub$YearsOfConversion))
 
 
+```
+
+
+Answer: **NO **
+
+Repeat: **Don't replicate**
