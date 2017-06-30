@@ -135,8 +135,9 @@ summary(lm(sub$year~sub$YearsOfConversion))
  Now the same for a remote-sensing derived estimate of "deforestation"
  Hansen only monitors from 2000 onwards, so we subset it to estimate >= 2000 
  Also limit only to those sites where sampling started before hansen deforestation 
+
  
- ```{r}
+```{r}
 subs <- subset(sub, year >= 2000) %>%
   dplyr::filter(SampleStart >= Hansenlossyear ) # Filter out sites that started after disturbance
 
@@ -148,3 +149,4 @@ cor.test(subs$year,subs$Hansenlossyear)
 summary(lm(subs$year~subs$YearsOfConversion))
 
 ```
+
